@@ -1,1 +1,181 @@
+<!doctype html>
+<html lang="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Prioriteringsspill – Næringsavdelingen</title>
+
+  <!-- Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <!-- Config -->
+  <script src="config.js"></script>
+
+  <style>
+    :root {
+      --bg:#f5f6f7; --card:#fff; --muted:#6b7280; --accent:#2563eb;
+      --danger:#b91c1c; --ok:#16a34a; --warn:#f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial; background:var(--bg); }
+    header { background:#0f172a; color:#fff; padding:14px 18px; }
+    header h1 { margin:0; font-size:18px; }
+    header .right { float:right; }
+    main { padding:16px; }
+    .row { display:flex; gap:16px; align-items:flex-start; }
+    .col { flex:1; min-width:0; }
+    .card { background:var(--card); border-radius:10px; padding:14px; box-shadow:0 6px 16px rgba(0,0,0,.08); }
+    .card h2 { margin:0 0 8px 0; font-size:16px; }
+    .card h3 { margin:10px 0 6px; font-size:14px; color:#111827; }
+    .muted { color:var(--muted); font-size:12px; }
+    .btn { border:0; border-radius:8px; padding:8px 12px; cursor:pointer; }
+    .btn.primary { background:var(--accent); color:#fff; }
+    .btn.ghost { background:#eef2ff; color:#1e3a8a; }
+    .btn.warn { background:#fff7ed; color:#9a3412; }
+    .btn.danger { background:#fee2e2; color:var(--danger); }
+    .btn:disabled { opacity:.6; cursor:not-allowed; }
+
+    /* Toggles / pills */
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#e5e7eb; font-size:11px; margin-left:6px; }
+
+    /* Lists */
+    .list { display:flex; flex-direction:column; gap:10px; }
+
+    /* People cards */
+    .person { border:1px solid #e5e7eb; border-radius:10px; padding:10px; }
+    .person .name { font-weight:600; }
+    .bar { height:8px; background:#e5e7eb; border-radius:999px; overflow:hidden; margin-top:6px; }
+    .bar > span { display:block; height:100%; background:var(--ok); width:0%; transition:width .2s; }
+    .bar.over > span { background:var(--danger); }
+
+    .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+    .chip { background:#dcfce7; color:#14532d; border-radius:999px; padding:4px 8px; font-size:12px; cursor:grab; user-select:none; }
+    .chip.money { background:#e0e7ff; color:#1e3a8a; }
+
+    /* Tasks */
+    .task { border:1px dashed #c7d2fe; border-radius:10px; padding:10px; }
+    .task .title { font-weight:600; }
+    .drop { min-height:40px; border-radius:8px; background:#f8fafc; padding:6px; margin-top:6px; }
+    .drop .chip { margin:3px; }
+
+    /* Budget */
+    .budget { border:1px solid #e5e7eb; border-radius:10px; padding:10px; }
+    .budget .title { font-weight:600; }
+    .budget .amount { font-size:12px; color:#111827; }
+    .budget .bar { margin-top:6px; }
+
+    /* Warnings */
+    .warnings { border-left:4px solid var(--warn); background:#fffbeb; padding:10px; border-radius:8px; }
+    .warnings ul { margin:6px 0 0 18px; }
+
+    /* Sections */
+    section { margin-bottom:16px; }
+
+    /* Header helpers */
+    .clearfix::after { content:""; display:block; clear:both; }
+
+    /* Hide helpers */
+    .hidden { display:none !important; }
+  </style>
+</head>
+
+<body>
+<header class="clearfix">
+  <h1>Prioriteringsspill – Næringsavdelingen</h1>
+  <div class="right">
+    <button id="modeEditor" class="btn ghost">Editor</button>
+    <button id="modePlayer" class="btn ghost">Player</button>
+    <button id="modeDashboard" class="btn ghost">Dashboard</button>
+  </div>
+</header>
+
+<main>
+  <!-- TOP CONTROLS -->
+  <section class="card">
+    <div class="row">
+      <div class="col">
+        <strong>Scenario</strong>
+        <span id="scenarioTitle" class="pill">—</span>
+        <span id="scenarioLock" class="pill">ulåst</span>
+      </div>
+      <div class="col" style="text-align:right">
+        <input id="playerName" placeholder="Skriv navn (Player)" />
+        <button id="lockScenario" class="btn warn">Lås scenario</button>
+        <button id="unlockScenario" class="btn warn hidden">Lås opp</button>
+        <button id="resetScenario" class="btn danger">Reset scenario</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- EDITOR -->
+  <section id="editor" class="hidden">
+    <div class="row">
+      <div class="col card">
+        <h2>Editor – Import / Oppsett</h2>
+        <p class="muted">Bygg scenarioet før workshop. Importer CSV eller legg til manuelt.</p>
+
+        <h3>CSV import</h3>
+        <input type="file" id="csvFile" />
+        <select id="csvType">
+          <option value="people">People</option>
+          <option value="budgets">Budgets</option>
+          <option value="tasks">Tasks</option>
+          <option value="rules">Rules</option>
+        </select>
+        <button id="importCsv" class="btn primary">Importer</button>
+
+        <h3>Budsjettregler</h3>
+        <div id="rulesEditor"></div>
+      </div>
+
+      <div class="col card">
+        <h2>Editor – Oversikt</h2>
+        <div id="editorSummary" class="muted">Ingen data lastet.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLAYER -->
+  <section id="player" class="hidden">
+    <div class="row">
+      <div class="col card">
+        <h2>Personer</h2>
+        <div id="peopleList" class="list"></div>
+      </div>
+
+      <div class="col card">
+        <h2>Oppgaver</h2>
+        <div id="tasksList" class="list"></div>
+      </div>
+
+      <div class="col card">
+        <h2>Budsjett</h2>
+        <div id="budgetsList" class="list"></div>
+
+        <div class="warnings hidden" id="warningsBox">
+          <strong>Varsler</strong>
+          <ul id="warningsList"></ul>
+        </div>
+
+        <button id="submitPlay" class="btn primary" style="margin-top:10px">Send inn anbefaling</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- DASHBOARD -->
+  <section id="dashboard" class="hidden">
+    <div class="card">
+      <h2>Dashboard</h2>
+      <p class="muted">Aggregert oversikt etter innsendinger.</p>
+      <div id="dashboardContent">Åpne dashboard.html for full visning.</div>
+    </div>
+  </section>
+</main>
+
+<!-- App -->
+<script src="app.js"></script>
+</body>
+</html>
 
