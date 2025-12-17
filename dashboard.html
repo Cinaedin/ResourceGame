@@ -1,163 +1,283 @@
-<!doctype html>
-<html lang="nb">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Dashboard – Prioriteringsøvelse</title>
+const { SUPABASE_URL, SUPABASE_ANON_KEY, SCENARIO_ID } = window.APP_CONFIG;
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="config.js"></script>
+let chartFundsPie = null;
+let chartPeoplePie = null;
+let chartTime = null;
+let chartMoney = null;
 
-  <style>
-    :root {
-      --bg:#f5f6f7;
-      --card:#ffffff;
-      --text:#111827;
-      --muted:#6b7280;
-      --border:#e5e7eb;
-      --blue:#2563eb;
+let cache = null;
+
+document.addEventListener("DOMContentLoaded", async () => {
+  document.getElementById("scenarioIdPill").innerText = SCENARIO_ID;
+  await loadDashboard();
+  document.getElementById("exportCsv").onclick = exportAggregatedCsv;
+});
+
+async function loadDashboard() {
+  // Always-visible context first
+  const [budgetsRes, peopleRes, tasksRes, playsRes] = await Promise.all([
+    db.from("budget_lines").select("*").eq("scenario_id", SCENARIO_ID),
+    db.from("people").select("*").eq("scenario_id", SCENARIO_ID),
+    db.from("tasks").select("*").eq("scenario_id", SCENARIO_ID),
+    db.from("playthroughs").select("*").eq("scenario_id", SCENARIO_ID).order("submitted_at", { ascending: false })
+  ]);
+
+  const budgets = budgetsRes.data || [];
+  const people = peopleRes.data || [];
+  const tasks = tasksRes.data || [];
+  const plays = playsRes.data || [];
+
+  renderFundsPie(budgets);
+  renderPeoplePie(people);
+
+  // If no submissions yet, still render empty charts + placeholders
+  if (!plays.length) {
+    renderCharts(tasks, new Map(), new Map());
+    renderIgnoredTasks(tasks, new Map(), new Map());
+    renderSubmissions([], []);
+    cache = { tasks, budgets, people, plays: [], timeByTask: new Map(), moneyByTask: new Map() };
+    return;
+  }
+
+  const playIds = plays.map(p => p.id);
+
+  const [timeRes, moneyRes, logsRes] = await Promise.all([
+    db.from("time_allocations").select("*").in("playthrough_id", playIds),
+    db.from("budget_allocations").select("*").in("playthrough_id", playIds),
+    db.from("logs").select("*").in("playthrough_id", playIds)
+  ]);
+
+  const time = timeRes.data || [];
+  const money = moneyRes.data || [];
+  const logs = logsRes.data || [];
+
+  // Aggregate per task
+  const timeByTask = new Map();   // task_id -> total pct
+  const moneyByTask = new Map();  // task_id -> total nok (handlingsrom only in practice, but allocations are only from game anyway)
+
+  time.forEach(a => {
+    const k = a.task_id;
+    timeByTask.set(k, (timeByTask.get(k) || 0) + Number(a.pct || 0));
+  });
+
+  money.forEach(a => {
+    const k = a.task_id;
+    // schema uses amount_nok; earlier versions used amount. Handle both.
+    const amt = Number(a.amount_nok ?? a.amount ?? 0);
+    moneyByTask.set(k, (moneyByTask.get(k) || 0) + amt);
+  });
+
+  renderCharts(tasks, timeByTask, moneyByTask);
+  renderIgnoredTasks(tasks, timeByTask, moneyByTask);
+  renderSubmissions(plays, logs);
+
+  cache = { tasks, budgets, people, plays, timeByTask, moneyByTask };
+}
+
+function renderFundsPie(budgets) {
+  const statSum = budgets
+    .filter(b => (b.type || "").toLowerCase() === "stat")
+    .reduce((s, b) => s + Number(b.amount_nok || 0), 0);
+
+  const flexSum = budgets
+    .filter(b => (b.type || "").toLowerCase() === "handlingsrom")
+    .reduce((s, b) => s + Number(b.amount_nok || 0), 0);
+
+  const total = statSum + flexSum;
+
+  document.getElementById("fundsText").innerText =
+    `Totalt: ${total.toLocaleString("nb-NO")} kr — ` +
+    `Låst (stat): ${statSum.toLocaleString("nb-NO")} kr, ` +
+    `Handlingsrom: ${flexSum.toLocaleString("nb-NO")} kr`;
+
+  const ctx = document.getElementById("chartFundsPie").getContext("2d");
+  if (chartFundsPie) chartFundsPie.destroy();
+
+  chartFundsPie = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: ["Låst (statlige midler)", "Fleksibelt (handlingsrom)"],
+      datasets: [{ data: [statSum, flexSum] }]
+    },
+    options: {
+      plugins: {
+        legend: { position: "bottom" },
+        tooltip: {
+          callbacks: {
+            label: (item) => `${item.label}: ${Number(item.raw).toLocaleString("nb-NO")} kr`
+          }
+        }
+      }
     }
+  });
+}
 
-    * { box-sizing:border-box; }
-    body {
-      margin:0;
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      background:var(--bg);
-      color:var(--text);
+function renderPeoplePie(people) {
+  const sorted = [...people].sort((a, b) => Number(b.capacity_pct || 0) - Number(a.capacity_pct || 0));
+  const labels = sorted.map(p => p.name);
+  const values = sorted.map(p => Number(p.capacity_pct || 0));
+
+  const total = values.reduce((s, v) => s + v, 0);
+  document.getElementById("peopleText").innerText =
+    `Total registrert kapasitet: ${total}% (sum av capacity_pct).`;
+
+  const ctx = document.getElementById("chartPeoplePie").getContext("2d");
+  if (chartPeoplePie) chartPeoplePie.destroy();
+
+  chartPeoplePie = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels,
+      datasets: [{ data: values }]
+    },
+    options: {
+      plugins: {
+        legend: { position: "bottom" },
+        tooltip: {
+          callbacks: {
+            label: (item) => `${item.label}: ${item.raw}%`
+          }
+        }
+      }
     }
+  });
+}
 
-    header {
-      background:#0f172a;
-      color:#fff;
-      padding:14px 18px;
+function renderCharts(tasks, timeByTask, moneyByTask) {
+  const topTime = tasks
+    .map(t => ({ title: t.title, val: timeByTask.get(t.id) || 0 }))
+    .sort((a, b) => b.val - a.val)
+    .slice(0, 12);
+
+  const topMoney = tasks
+    .map(t => ({ title: t.title, val: moneyByTask.get(t.id) || 0 }))
+    .sort((a, b) => b.val - a.val)
+    .slice(0, 12);
+
+  // Time
+  if (chartTime) chartTime.destroy();
+  chartTime = new Chart(document.getElementById("chartTime").getContext("2d"), {
+    type: "bar",
+    data: {
+      labels: topTime.map(x => x.title),
+      datasets: [{ label: "Total tid (%)", data: topTime.map(x => x.val) }]
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true } }
     }
-    header h1 { margin:0; font-size:18px; font-weight:600; }
+  });
 
-    main { padding:16px; }
-
-    .card {
-      background:var(--card);
-      border-radius:10px;
-      padding:14px;
-      box-shadow:0 6px 16px rgba(0,0,0,.08);
-      margin-bottom:16px;
+  // Money
+  if (chartMoney) chartMoney.destroy();
+  chartMoney = new Chart(document.getElementById("chartMoney").getContext("2d"), {
+    type: "bar",
+    data: {
+      labels: topMoney.map(x => x.title),
+      datasets: [{ label: "Total handlingsrom (NOK)", data: topMoney.map(x => x.val) }]
+    },
+    options: {
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (item) => `${Number(item.raw).toLocaleString("nb-NO")} kr`
+          }
+        }
+      },
+      scales: { y: { beginAtZero: true } }
     }
+  });
+}
 
-    .row { display:flex; gap:16px; align-items:flex-start; }
-    .col { flex:1; min-width:0; }
+function renderIgnoredTasks(tasks, timeByTask, moneyByTask) {
+  const ignored = tasks.filter(t => {
+    const tVal = timeByTask.get(t.id) || 0;
+    const mVal = moneyByTask.get(t.id) || 0;
+    return tVal === 0 && mVal === 0;
+  });
 
-    h2 { margin:0 0 6px; font-size:16px; }
-    .muted { color:var(--muted); font-size:12px; }
+  const wrap = document.getElementById("ignoredTasks");
+  if (!ignored.length) {
+    wrap.innerHTML = `<div class="muted">Ingen oppgaver er helt uten dekning (ennå).</div>`;
+    return;
+  }
 
-    table { width:100%; border-collapse:collapse; }
-    th, td { padding:8px; border-bottom:1px solid var(--border); text-align:left; }
-    th { font-size:12px; color:var(--muted); font-weight:600; }
+  wrap.innerHTML = `
+    <div><b>${ignored.length}</b> oppgaver uten dekning:</div>
+    <ul>
+      ${ignored.map(t => `<li>${escapeHtml(t.title)}</li>`).join("")}
+    </ul>
+  `;
+}
 
-    pre {
-      white-space:pre-wrap;
-      font-size:12px;
-      background:#f8fafc;
-      padding:10px;
-      border-radius:8px;
-      border:1px solid var(--border);
-      margin:0;
-    }
+function renderSubmissions(plays, logs) {
+  const logsByPlay = new Map((logs || []).map(l => [l.playthrough_id, l]));
+  const wrap = document.getElementById("submissions");
 
-    button {
-      border:0;
-      border-radius:8px;
-      padding:8px 12px;
-      cursor:pointer;
-      background:var(--blue);
-      color:#fff;
-      font-size:13px;
-    }
+  if (!plays.length) {
+    wrap.innerHTML = `<div class="muted">Ingen innsendinger ennå.</div>`;
+    return;
+  }
 
-    .pill {
-      display:inline-block;
-      padding:2px 8px;
-      border-radius:999px;
-      background:#e5e7eb;
-      font-size:11px;
-      margin-left:6px;
-    }
+  let html = `<table>
+    <thead><tr><th>Navn</th><th>Tidspunkt</th><th></th></tr></thead><tbody>`;
 
-    ul { margin:8px 0 0 18px; }
-  </style>
-</head>
+  plays.forEach(p => {
+    const when = p.submitted_at ? new Date(p.submitted_at).toLocaleString("nb-NO") : "";
+    html += `<tr>
+      <td><b>${escapeHtml(p.user_name)}</b></td>
+      <td class="muted">${escapeHtml(when)}</td>
+      <td><button data-id="${p.id}">Vis</button></td>
+    </tr>`;
+  });
 
-<body>
-<header>
-  <h1>Dashboard – Prioriteringsøvelse</h1>
-</header>
+  html += `</tbody></table>`;
+  wrap.innerHTML = html;
 
-<main>
+  wrap.querySelectorAll("button[data-id]").forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.getAttribute("data-id");
+      const log = logsByPlay.get(id);
+      const out = log?.raw ? JSON.stringify(log.raw, null, 2) : "(ingen logg)";
+      document.getElementById("logView").textContent = out;
+    };
+  });
+}
 
-  <div class="card">
-    <div class="muted">
-      Viser aggregert oversikt over innsendte prioriteringer.
-      Dette er en prioriteringsøvelse (ikke en evaluering av enkeltpersoner).
-    </div>
-    <div style="margin-top:8px;">
-      Scenario-ID: <span class="pill" id="scenarioIdPill">–</span>
-    </div>
-  </div>
+function exportAggregatedCsv() {
+  if (!cache) return;
 
-  <!-- ALWAYS VISIBLE: CONTEXT DONUTS -->
-  <div class="row">
-    <div class="col card">
-      <h2>Fordeling av midler</h2>
-      <div class="muted">Låst (stat) vs fleksibelt (handlingsrom).</div>
-      <canvas id="chartFundsPie"></canvas>
-      <div class="muted" id="fundsText" style="margin-top:8px;"></div>
-    </div>
+  const { tasks, timeByTask, moneyByTask } = cache;
 
-    <div class="col card">
-      <h2>Fordeling av personellkapasitet</h2>
-      <div class="muted">Basert på registrert kapasitet per person (capacity_pct).</div>
-      <canvas id="chartPeoplePie"></canvas>
-      <div class="muted" id="peopleText" style="margin-top:8px;"></div>
-    </div>
-  </div>
+  const rows = [];
+  rows.push(["oppgave", "tid_total_pct", "handlingsrom_total_nok"].map(csv).join(","));
 
-  <!-- RESULTS -->
-  <div class="row" style="margin-top:16px;">
-    <div class="col card">
-      <h2>Topp oppgaver (tid)</h2>
-      <div class="muted">Summert over alle innsendinger.</div>
-      <canvas id="chartTime"></canvas>
-    </div>
-    <div class="col card">
-      <h2>Topp oppgaver (handlingsrom – NOK)</h2>
-      <div class="muted">Kun fleksible midler (handlingsrom) teller her.</div>
-      <canvas id="chartMoney"></canvas>
-    </div>
-  </div>
+  tasks.forEach(t => {
+    rows.push([
+      t.title,
+      timeByTask.get(t.id) || 0,
+      moneyByTask.get(t.id) || 0
+    ].map(csv).join(","));
+  });
 
-  <!-- IGNORED TASKS + SUBMISSIONS -->
-  <div class="row" style="margin-top:16px;">
-    <div class="col card">
-      <h2>Oppgaver uten dekning</h2>
-      <div class="muted">Oppgaver uten både tid og midler (handlingsrom) på tvers av innsendinger.</div>
-      <div id="ignoredTasks">(laster...)</div>
-    </div>
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `dashboard_aggregert_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
-    <div class="col card">
-      <h2>Innsendinger</h2>
-      <div class="muted">Klikk «Vis» for å se logg (brukes primært for kvalitetssjekk).</div>
-      <div id="submissions">(laster...)</div>
-      <button id="exportCsv" style="margin-top:10px;">Eksporter aggregert CSV</button>
-    </div>
-  </div>
+function csv(v) {
+  return `"${String(v ?? "").replaceAll('"', '""')}"`;
+}
 
-  <div class="card">
-    <h2>Valgt logg</h2>
-    <pre id="logView">(velg en innsending)</pre>
-  </div>
-
-</main>
-
-<script src="dashboard.js"></script>
-</body>
-</html>
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
