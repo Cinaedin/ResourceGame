@@ -1,6 +1,6 @@
 /* ===============================
    Prioriteringsøvelse – app.js
-   (FULL ERSTATNING – FIX: sliders live)
+   (FULL ERSTATNING – FIX: nav, filter, budsjett, navn)
    =============================== */
 
 const { SUPABASE_URL, SUPABASE_ANON_KEY, SCENARIO_ID } = window.APP_CONFIG;
@@ -14,22 +14,42 @@ const state = {
   timeAlloc: [],     // { person_id, task_id, pct }
   moneyAlloc: [],    // { budget_line_id, task_id, amount }
   currentTask: null,
-  showOnlyUncovered: false
+  showOnlyUncovered: false,
+  playerName: ""
 };
 
 document.addEventListener("DOMContentLoaded", async () => {
-  bindGlobalButtons();
+  bindUI();
   await loadScenario();
   await loadData();
   refreshMainUI();
+  updateSubmitEnabled();
 });
 
 function el(id) { return document.getElementById(id); }
+function norm(s){ return String(s ?? "").trim().toLowerCase(); }
 
 /* -------------------------------
-   Bindings
+   Bind UI
 --------------------------------*/
-function bindGlobalButtons() {
+function bindUI() {
+  // Top navigation
+  const btnEditor = el("modeEditor");
+  const btnPlayer = el("modePlayer");
+  const btnDash = el("modeDashboard");
+
+  if (btnEditor) btnEditor.onclick = () => {
+    // Hvis dere har editor.html fra tidligere, fungerer dette.
+    // Hvis ikke, sier vi fra på en vennlig måte.
+    fetch("editor.html", { method: "HEAD" })
+      .then(r => r.ok ? (window.location.href = "editor.html") : alert("Editor-visning er ikke lagt inn i denne versjonen ennå."))
+      .catch(() => alert("Editor-visning er ikke lagt inn i denne versjonen ennå."));
+  };
+
+  if (btnPlayer) btnPlayer.onclick = () => window.location.href = "index.html";
+  if (btnDash) btnDash.onclick = () => window.location.href = "dashboard.html";
+
+  // Filter: vis kun RØDE (uten dekning)
   el("filterUncovered").onclick = () => {
     state.showOnlyUncovered = !state.showOnlyUncovered;
     el("filterUncovered").innerText =
@@ -37,8 +57,26 @@ function bindGlobalButtons() {
     renderTasks();
   };
 
+  // Panel
   el("closeTaskPanel").onclick = () => closeTaskPanel();
   el("resetTask").onclick = () => resetCurrentTask();
+
+  // Navn: Enter = lagre navn og gi liten “start”-følelse
+  const nameInput = el("playerName");
+  nameInput.addEventListener("input", () => {
+    state.playerName = nameInput.value.trim();
+    updateSubmitEnabled();
+  });
+  nameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      state.playerName = nameInput.value.trim();
+      updateSubmitEnabled();
+      // Scroll litt ned til oppgaver for å signalisere "start"
+      window.scrollTo({ top: nameInput.getBoundingClientRect().top + window.scrollY + 250, behavior: "smooth" });
+    }
+  });
+
+  // Submit
   el("submitPlay").onclick = () => submitPlay();
 }
 
@@ -78,7 +116,7 @@ async function loadData() {
 }
 
 /* -------------------------------
-   Main UI refresh (everything except panel)
+   Main UI refresh
 --------------------------------*/
 function refreshMainUI() {
   renderCapacityBars();
@@ -90,7 +128,7 @@ function refreshMainUI() {
    Capacity bars
 --------------------------------*/
 function renderCapacityBars() {
-  // People: total available capacity
+  // People
   const totalCap = state.people.reduce((s, p) => s + Number(p.capacity_pct || 0), 0);
   const usedCap = state.timeAlloc.reduce((s, a) => s + Number(a.pct || 0), 0);
 
@@ -99,11 +137,10 @@ function renderCapacityBars() {
   const pPct = totalCap ? Math.min(100, (usedCap / totalCap) * 100) : 0;
   pSpan.style.width = `${pPct}%`;
   pBar.classList.toggle("over", usedCap > totalCap);
-
   el("peopleCapacityText").innerText = `${usedCap}% brukt av ${totalCap}% tilgjengelig`;
 
-  // Budget: handlingsrom only
-  const flexBudgets = state.budgets.filter(b => (b.type || "").toLowerCase() === "handlingsrom");
+  // Handlingsrom budget
+  const flexBudgets = state.budgets.filter(b => norm(b.type) === "handlingsrom");
   const totalBudget = flexBudgets.reduce((s, b) => s + Number(b.amount_nok || 0), 0);
   const usedBudget = state.moneyAlloc.reduce((s, a) => s + Number(a.amount || 0), 0);
 
@@ -112,7 +149,6 @@ function renderCapacityBars() {
   const bPct = totalBudget ? Math.min(100, (usedBudget / totalBudget) * 100) : 0;
   bSpan.style.width = `${bPct}%`;
   bBar.classList.toggle("over", usedBudget > totalBudget);
-
   el("budgetCapacityText").innerText =
     `${usedBudget.toLocaleString("nb-NO")} kr brukt av ${totalBudget.toLocaleString("nb-NO")} kr handlingsrom`;
 }
@@ -134,7 +170,9 @@ function renderTasks() {
 
   state.tasks.forEach(task => {
     const status = taskStatus(task.id);
-    if (state.showOnlyUncovered && status === "green") return;
+
+    // Filter skal vise kun RØDE (uten dekning)
+    if (state.showOnlyUncovered && status !== "red") return;
 
     const card = document.createElement("div");
     card.className = `task ${status}`;
@@ -170,7 +208,7 @@ function taskStatusText(taskId) {
 }
 
 /* -------------------------------
-   Task panel (sliders)
+   Task panel
 --------------------------------*/
 function openTaskPanel(task) {
   state.currentTask = task;
@@ -180,9 +218,8 @@ function openTaskPanel(task) {
   const wrap = el("taskPanelContent");
   wrap.innerHTML = "";
 
-  // --- PEOPLE ---
+  // PEOPLE
   wrap.appendChild(sectionTitle("Personell"));
-
   state.people.forEach(p => {
     const current = getTimeAlloc(p.id, task.id);
 
@@ -208,7 +245,8 @@ function openTaskPanel(task) {
       const v = Number(e.target.value || 0);
       right.textContent = `${v}%`;
       setTimeAlloc(p.id, task.id, v);
-      refreshMainUI(); // update bars + task colors + meter
+      refreshMainUI();
+      updateSubmitEnabled();
     });
 
     row.appendChild(label);
@@ -216,12 +254,17 @@ function openTaskPanel(task) {
     wrap.appendChild(row);
   });
 
-  // --- BUDGET (HANDLINGSROM) ---
+  // BUDSJETT (handlingsrom)
   wrap.appendChild(sectionTitle("Budsjett (handlingsrom)"));
 
-  state.budgets
-    .filter(b => (b.type || "").toLowerCase() === "handlingsrom")
-    .forEach(b => {
+  const flex = state.budgets.filter(b => norm(b.type) === "handlingsrom");
+  if (!flex.length) {
+    const info = document.createElement("div");
+    info.className = "muted";
+    info.textContent = "Ingen budsjettlinjer av typen «handlingsrom» er registrert (eller type-feltet matcher ikke).";
+    wrap.appendChild(info);
+  } else {
+    flex.forEach(b => {
       const current = getMoneyAlloc(b.id, task.id);
 
       const row = document.createElement("div");
@@ -247,16 +290,18 @@ function openTaskPanel(task) {
         right.textContent = `${v.toLocaleString("nb-NO")} kr`;
         setMoneyAlloc(b.id, task.id, v);
         refreshMainUI();
+        updateSubmitEnabled();
       });
 
       row.appendChild(label);
       row.appendChild(slider);
       wrap.appendChild(row);
     });
+  }
 
-  // --- LOCKED (STAT) CONTEXT (read-only) ---
-  const statBudgets = state.budgets.filter(b => (b.type || "").toLowerCase() === "stat");
-  if (statBudgets.length) {
+  // STAT (låst – kun kontekst)
+  const stat = state.budgets.filter(b => norm(b.type) === "stat");
+  if (stat.length) {
     wrap.appendChild(sectionTitle("Statlige midler (låst)"));
     const info = document.createElement("div");
     info.className = "muted";
@@ -265,7 +310,7 @@ function openTaskPanel(task) {
 
     const ul = document.createElement("ul");
     ul.style.marginTop = "8px";
-    statBudgets.forEach(b => {
+    stat.forEach(b => {
       const li = document.createElement("li");
       li.textContent = `${b.title} – ${Number(b.amount_nok || 0).toLocaleString("nb-NO")} kr`;
       ul.appendChild(li);
@@ -311,15 +356,29 @@ function resetCurrentTask() {
   const taskId = state.currentTask.id;
   state.timeAlloc = state.timeAlloc.filter(a => a.task_id !== taskId);
   state.moneyAlloc = state.moneyAlloc.filter(a => a.task_id !== taskId);
-  openTaskPanel(state.currentTask); // rebuild panel with zeros
+  openTaskPanel(state.currentTask);
   refreshMainUI();
+  updateSubmitEnabled();
+}
+
+/* -------------------------------
+   Submit enable/disable
+--------------------------------*/
+function updateSubmitEnabled() {
+  const btn = el("submitPlay");
+  const hasName = !!(state.playerName || el("playerName").value.trim());
+  const hasAny = state.timeAlloc.length > 0 || state.moneyAlloc.length > 0;
+
+  btn.disabled = !(hasName && hasAny);
+  btn.style.opacity = btn.disabled ? "0.5" : "1";
+  btn.style.cursor = btn.disabled ? "not-allowed" : "pointer";
 }
 
 /* -------------------------------
    Submit
 --------------------------------*/
 async function submitPlay() {
-  const name = el("playerName").value.trim();
+  const name = (state.playerName || el("playerName").value).trim();
   if (!name) return alert("Vennligst skriv navnet ditt før innsending.");
   if (state.timeAlloc.length === 0 && state.moneyAlloc.length === 0) {
     return alert("Du må gjøre minst én prioritering før innsending.");
