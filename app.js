@@ -2,11 +2,8 @@
    Prioriteringsøvelse – app.js
    =============================== */
 
-const { SUPABASE_URL, SUPABASE_ANON_KEY, SCENARIO_ID } = window.APP_CONFIG;
-const supabase = window.supabase.createClient(
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY
-);
+const { SCENARIO_ID } = window.APP_CONFIG;
+// supabase-klienten er allerede opprettet i config.js
 
 /* -------------------------------
    Global state
