@@ -6,7 +6,6 @@
   <title>Prioriteringsøvelse – Næringsavdelingen</title>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="config.js"></script>
 
   <style>
@@ -17,19 +16,22 @@
     }
     *{box-sizing:border-box}
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
-    header{background:#0f172a;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center}
+    header{background:#0f172a;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px}
     header h1{margin:0;font-size:18px;font-weight:600}
     main{padding:16px}
     .card{background:var(--card);border-radius:10px;padding:14px;box-shadow:0 6px 16px rgba(0,0,0,.08);margin-bottom:16px}
+    .muted{color:var(--muted);font-size:12px}
     .row{display:flex;gap:16px;align-items:flex-start}
     .col{flex:1;min-width:0}
     h2{margin:0 0 6px;font-size:16px}
     h3{margin:12px 0 6px;font-size:14px}
-    .muted{color:var(--muted);font-size:12px}
+
     .btn{border:0;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:13px}
     .btn.primary{background:var(--blue);color:#fff}
     .btn.ghost{background:#eef2ff;color:#1e3a8a}
     .btn.danger{background:#fee2e2;color:var(--red)}
+    .btn:disabled{opacity:.55;cursor:not-allowed}
+
     .hidden{display:none!important}
 
     .bar{height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden;margin-top:6px}
@@ -44,21 +46,22 @@
     .task-header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
     .task-title{font-weight:650;font-size:14px}
     .task-status{font-size:12px;margin-top:2px}
-    .task-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
     .pill{display:inline-block;padding:2px 10px;border-radius:999px;background:#e5e7eb;font-size:11px}
+    .task-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
 
-    details{margin-top:10px}
-    summary{cursor:pointer;font-weight:600;font-size:13px}
-    .sliders{margin-top:8px;display:grid;gap:10px}
-    .slider-row label{display:flex;justify-content:space-between;font-size:13px}
+    .expand-btn{background:#f3f4f6;border:1px solid var(--border);border-radius:10px;padding:6px 10px;cursor:pointer;font-size:12px}
+    .panel{margin-top:10px;border-top:1px dashed var(--border);padding-top:10px}
+    .panel h4{margin:0 0 8px;font-size:13px}
+
+    .control-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+    select,input[type=text]{padding:6px;border:1px solid var(--border);border-radius:8px}
+    .alloc-list{display:grid;gap:10px}
+    .alloc{border:1px solid var(--border);border-radius:10px;padding:10px;background:#fafafa}
+    .alloc label{display:flex;justify-content:space-between;font-size:13px}
     input[type=range]{width:100%}
+    .alloc-actions{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:8px}
 
     footer{text-align:center;font-size:12px;color:var(--muted);padding:10px 0}
-    table{width:100%;border-collapse:collapse}
-    th,td{padding:8px;border-bottom:1px solid var(--border);text-align:left}
-    th{font-size:12px;color:var(--muted);font-weight:650}
-    textarea{width:100%;min-height:100px}
-    select,input[type=file],input[type=text]{padding:6px;border:1px solid var(--border);border-radius:8px}
   </style>
 </head>
 
@@ -88,46 +91,26 @@
     <div class="muted" id="budgetCapacityText"></div>
   </div>
 
-  <!-- EDITOR VIEW -->
+  <!-- EDITOR VIEW (enkel) -->
   <section id="editorView" class="hidden">
     <div class="card">
       <h2>Editor</h2>
-      <div class="muted">
-        Her kan dere bygge scenario sammen (enkel versjon). Endringer lagres i databasen og blir synlige for alle.
-      </div>
-    </div>
+      <div class="muted">Enkel scenario-bygging (CSV-import + reset av innsendinger).</div>
 
-    <div class="row">
-      <div class="col card">
-        <h2>CSV-import</h2>
-        <div class="muted">Støtter: Personer, Oppgaver, Budsjettlinjer.</div>
-        <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
-          <select id="csvType">
-            <option value="people">Personer</option>
-            <option value="tasks">Oppgaver</option>
-            <option value="budget_lines">Budsjettlinjer</option>
-          </select>
-          <input type="file" id="csvFile" accept=".csv" />
-          <button class="btn primary" id="btnImportCsv">Importer CSV</button>
-        </div>
-        <div class="muted" style="margin-top:10px">
-          CSV-format:
-          <ul>
-            <li><b>Personer</b>: name, capacity_pct</li>
-            <li><b>Oppgaver</b>: title, program</li>
-            <li><b>Budsjettlinjer</b>: title, type (handlingsrom/stat), amount_nok</li>
-          </ul>
-        </div>
-        <div id="editorMsg" class="muted" style="margin-top:8px"></div>
+      <h3>CSV-import</h3>
+      <div class="control-row">
+        <select id="csvType">
+          <option value="people">Personer (name, capacity_pct)</option>
+          <option value="tasks">Oppgaver (title, program)</option>
+          <option value="budget_lines">Budsjettlinjer (title, type, amount_nok)</option>
+        </select>
+        <input type="file" id="csvFile" accept=".csv" />
+        <button class="btn primary" id="btnImportCsv">Importer CSV</button>
       </div>
 
-      <div class="col card">
-        <h2>Scenario-kontroll</h2>
-        <button class="btn danger" id="btnResetScenario">Reset scenario (sletter innsendinger)</button>
-        <div class="muted" style="margin-top:8px">
-          Reset sletter playthroughs, allocations og logs for dette scenarioet. Selve oppgaver/personer/budsjett beholdes.
-        </div>
-      </div>
+      <h3>Scenario-kontroll</h3>
+      <button class="btn danger" id="btnResetScenario">Reset scenario (sletter innsendinger)</button>
+      <div id="editorMsg" class="muted" style="margin-top:8px"></div>
     </div>
   </section>
 
