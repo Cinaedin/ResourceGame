@@ -13,6 +13,9 @@ const state = {
   playerName: ""
 };
 
+// taskId -> { cardEl, statusEl }
+const domIndex = new Map();
+
 const el = (id) => document.getElementById(id);
 const norm = (s) => String(s ?? "").trim().toLowerCase();
 
@@ -23,7 +26,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await loadScenario();
   await loadData();
-  refreshAll();
+  renderAll(); // full first render
 });
 
 function bindNav() {
@@ -48,7 +51,7 @@ function bindPlayer() {
     el("filterUncovered").innerText = state.showOnlyUncovered
       ? "Vis alle oppgaver"
       : "Vis kun oppgaver uten dekning";
-    renderTasks();
+    renderTasks(); // filter needs full rerender
   };
 
   el("playerName").addEventListener("input", () => {
@@ -60,7 +63,10 @@ function bindPlayer() {
     if (e.key === "Enter") {
       state.playerName = el("playerName").value.trim();
       updateSubmitEnabled();
-      window.scrollTo({ top: el("taskList").getBoundingClientRect().top + window.scrollY - 20, behavior: "smooth" });
+      window.scrollTo({
+        top: el("taskList").getBoundingClientRect().top + window.scrollY - 20,
+        behavior: "smooth"
+      });
     }
   });
 
@@ -68,13 +74,18 @@ function bindPlayer() {
 }
 
 function bindEditor() {
-  el("btnImportCsv").onclick = importCsv;
-  el("btnResetScenario").onclick = resetScenarioData;
+  if (el("btnImportCsv")) el("btnImportCsv").onclick = importCsv;
+  if (el("btnResetScenario")) el("btnResetScenario").onclick = resetScenarioData;
 }
 
 async function loadScenario() {
-  const { data, error } = await db.from("scenarios").select("*").eq("id", SCENARIO_ID).single();
+  const { data, error } = await db
+    .from("scenarios")
+    .select("*")
+    .eq("id", SCENARIO_ID)
+    .single();
   if (error) throw error;
+
   state.scenario = data;
   el("scenarioTitle").innerText = data?.title || "–";
   el("scenarioLock").innerText = data?.is_locked ? "Scenario er låst" : "Scenario er åpent";
@@ -92,13 +103,38 @@ async function loadData() {
   state.budgets = budgetsRes.data || [];
 }
 
-function refreshAll() {
+function renderAll() {
   renderCapacityBars();
   renderCoverageMeter();
   renderTasks();
   updateSubmitEnabled();
 }
 
+/* ---------- Lightweight updates during dragging ---------- */
+function updateDuringDrag(taskId) {
+  renderCapacityBars();
+  renderCoverageMeter();
+  updateTaskCard(taskId);
+
+  // If filter is ON and task just became non-red, remove it live (no rerender needed)
+  if (state.showOnlyUncovered) {
+    const status = taskStatus(taskId);
+    if (status !== "red") {
+      const entry = domIndex.get(taskId);
+      if (entry?.cardEl) entry.cardEl.remove();
+      domIndex.delete(taskId);
+    }
+  }
+
+  updateSubmitEnabled();
+}
+
+function finalizeAfterDrag() {
+  // Only necessary if filter is ON (might need to re-include items when they become red again)
+  if (state.showOnlyUncovered) renderTasks();
+}
+
+/* ---------- Bars ---------- */
 function renderCapacityBars() {
   const totalCap = state.people.reduce((s, p) => s + Number(p.capacity_pct || 0), 0);
   const usedCap = state.timeAlloc.reduce((s, a) => s + Number(a.pct || 0), 0);
@@ -119,6 +155,12 @@ function renderCapacityBars() {
     `${usedBudget.toLocaleString("nb-NO")} kr brukt av ${totalBudget.toLocaleString("nb-NO")} kr handlingsrom`;
 }
 
+function renderCoverageMeter() {
+  const covered = state.tasks.filter(t => taskStatus(t.id) === "green").length;
+  el("coverageMeter").innerText = `${covered} / ${state.tasks.length} oppgaver dekket`;
+}
+
+/* ---------- Status helpers ---------- */
 function taskStatus(taskId) {
   const hasPeople = state.timeAlloc.some(a => a.task_id === taskId && a.pct > 0);
   const hasMoney = state.moneyAlloc.some(a => a.task_id === taskId && a.amount > 0);
@@ -136,50 +178,44 @@ function taskStatusText(taskId) {
   return "Dekket";
 }
 
-function renderCoverageMeter() {
-  const covered = state.tasks.filter(t => taskStatus(t.id) === "green").length;
-  el("coverageMeter").innerText = `${covered} / ${state.tasks.length} oppgaver dekket`;
+function updateTaskCard(taskId) {
+  const entry = domIndex.get(taskId);
+  if (!entry?.cardEl) return;
+
+  const status = taskStatus(taskId);
+  entry.cardEl.classList.remove("red", "yellow", "green");
+  entry.cardEl.classList.add(status);
+
+  if (entry.statusEl) entry.statusEl.textContent = taskStatusText(taskId);
 }
 
-/* ---------- Dropdown+slider allocations ---------- */
-
+/* ---------- Alloc helpers ---------- */
 function assignedPeople(taskId) {
   return state.timeAlloc.filter(a => a.task_id === taskId).map(a => a.person_id);
 }
-
 function assignedBudgets(taskId) {
   return state.moneyAlloc.filter(a => a.task_id === taskId).map(a => a.budget_line_id);
 }
-
-function getTimeAlloc(personId, taskId) {
-  return state.timeAlloc.find(a => a.person_id === personId && a.task_id === taskId)?.pct || 0;
-}
-
 function setTimeAlloc(personId, taskId, pct) {
   state.timeAlloc = state.timeAlloc.filter(a => !(a.person_id === personId && a.task_id === taskId));
   if (pct > 0) state.timeAlloc.push({ person_id: personId, task_id: taskId, pct });
 }
-
 function removeTimeAlloc(personId, taskId) {
   state.timeAlloc = state.timeAlloc.filter(a => !(a.person_id === personId && a.task_id === taskId));
 }
-
-function getMoneyAlloc(budgetId, taskId) {
-  return state.moneyAlloc.find(a => a.budget_line_id === budgetId && a.task_id === taskId)?.amount || 0;
-}
-
 function setMoneyAlloc(budgetId, taskId, amount) {
   state.moneyAlloc = state.moneyAlloc.filter(a => !(a.budget_line_id === budgetId && a.task_id === taskId));
   if (amount > 0) state.moneyAlloc.push({ budget_line_id: budgetId, task_id: taskId, amount });
 }
-
 function removeMoneyAlloc(budgetId, taskId) {
   state.moneyAlloc = state.moneyAlloc.filter(a => !(a.budget_line_id === budgetId && a.task_id === taskId));
 }
 
+/* ---------- Render tasks (FULL render only) ---------- */
 function renderTasks() {
   const wrap = el("taskList");
   wrap.innerHTML = "";
+  domIndex.clear();
 
   const flexBudgets = state.budgets.filter(b => norm(b.type) === "handlingsrom");
 
@@ -196,7 +232,7 @@ function renderTasks() {
     const left = document.createElement("div");
     left.innerHTML = `
       <div class="task-title">${escapeHtml(task.title)}</div>
-      <div class="task-status">${escapeHtml(taskStatusText(task.id))}</div>
+      <div class="task-status" id="status-${task.id}">${escapeHtml(taskStatusText(task.id))}</div>
       <div class="task-meta">${task.program ? `<span class="pill">${escapeHtml(task.program)}</span>` : ""}</div>
     `;
 
@@ -206,24 +242,25 @@ function renderTasks() {
     expand.onclick = (e) => {
       e.preventDefault();
       state.expanded.has(task.id) ? state.expanded.delete(task.id) : state.expanded.add(task.id);
-      renderTasks(); // re-render for open/close
+      renderTasks(); // open/close is fine to rerender
     };
 
     header.appendChild(left);
     header.appendChild(expand);
     card.appendChild(header);
 
+    const statusEl = left.querySelector(`#status-${CSS.escape(String(task.id))}`) || left.querySelector(".task-status");
+    domIndex.set(task.id, { cardEl: card, statusEl });
+
     if (state.expanded.has(task.id)) {
       const panel = document.createElement("div");
       panel.className = "panel";
 
-      // Personell section
-      panel.appendChild(sectionTitle("Personell"));
+      panel.appendChild(h4("Personell"));
       panel.appendChild(personPicker(task.id));
       panel.appendChild(personAllocList(task.id));
 
-      // Budget section
-      panel.appendChild(sectionTitle("Budsjett (handlingsrom)"));
+      panel.appendChild(h4("Budsjett (handlingsrom)"));
       if (!flexBudgets.length) {
         const info = document.createElement("div");
         info.className = "muted";
@@ -234,7 +271,6 @@ function renderTasks() {
         panel.appendChild(budgetAllocList(task.id, flexBudgets));
       }
 
-      // Reset task
       const reset = document.createElement("button");
       reset.className = "btn danger";
       reset.style.marginTop = "10px";
@@ -242,7 +278,8 @@ function renderTasks() {
       reset.onclick = () => {
         state.timeAlloc = state.timeAlloc.filter(a => a.task_id !== task.id);
         state.moneyAlloc = state.moneyAlloc.filter(a => a.task_id !== task.id);
-        refreshAll();
+        renderAll(); // safe to rerender on reset
+        state.expanded.add(task.id);
       };
       panel.appendChild(reset);
 
@@ -253,20 +290,23 @@ function renderTasks() {
   });
 }
 
-function sectionTitle(text) {
+function h4(t) {
   const h = document.createElement("h4");
-  h.textContent = text;
+  h.textContent = t;
   return h;
 }
 
+/* ---------- Person UI ---------- */
 function personPicker(taskId) {
+  const wrap = document.createElement("div");
+
   const row = document.createElement("div");
   row.className = "control-row";
 
   const sel = document.createElement("select");
   const assigned = new Set(assignedPeople(taskId));
-
   const available = state.people.filter(p => !assigned.has(p.id));
+
   const opt0 = document.createElement("option");
   opt0.value = "";
   opt0.textContent = available.length ? "Velg person…" : "Alle personer er lagt til";
@@ -285,9 +325,9 @@ function personPicker(taskId) {
   btn.onclick = () => {
     const pid = sel.value;
     if (!pid) return;
-    setTimeAlloc(pid, taskId, 10); // default
-    refreshAll();
+    setTimeAlloc(pid, taskId, 10);
     state.expanded.add(taskId);
+    renderAll(); // after add we can rerender (not during drag)
   };
 
   row.appendChild(sel);
@@ -295,9 +335,8 @@ function personPicker(taskId) {
 
   const hint = document.createElement("div");
   hint.className = "muted";
-  hint.textContent = "Tips: legg til 1–3 personer per oppgave i stedet for å fordele alle på alt.";
+  hint.textContent = "Legg til noen få personer per oppgave – juster deretter med drag på slider.";
 
-  const wrap = document.createElement("div");
   wrap.appendChild(row);
   wrap.appendChild(hint);
   return wrap;
@@ -332,7 +371,8 @@ function personAllocList(taskId) {
     const right = document.createElement("span");
     left.textContent = a.name;
     right.textContent = `${a.pct}%`;
-    label.appendChild(left); label.appendChild(right);
+    label.appendChild(left);
+    label.appendChild(right);
 
     const slider = document.createElement("input");
     slider.type = "range";
@@ -341,13 +381,16 @@ function personAllocList(taskId) {
     slider.step = "5";
     slider.value = String(a.pct);
 
-    // Important: slider MUST NOT collapse anything — no summary/details used now.
+    // KEY: do NOT rerender the list while dragging
     slider.addEventListener("input", (e) => {
       const v = Number(e.target.value || 0);
       right.textContent = `${v}%`;
       setTimeAlloc(a.person_id, taskId, v);
-      refreshAll();
-      state.expanded.add(taskId);
+      updateDuringDrag(taskId);
+    });
+
+    slider.addEventListener("change", () => {
+      finalizeAfterDrag();
     });
 
     const actions = document.createElement("div");
@@ -358,8 +401,8 @@ function personAllocList(taskId) {
     remove.textContent = "Fjern";
     remove.onclick = () => {
       removeTimeAlloc(a.person_id, taskId);
-      refreshAll();
       state.expanded.add(taskId);
+      renderAll();
     };
 
     actions.appendChild(document.createElement("div"));
@@ -374,7 +417,10 @@ function personAllocList(taskId) {
   return list;
 }
 
+/* ---------- Budget UI ---------- */
 function budgetPicker(taskId, flexBudgets) {
+  const wrap = document.createElement("div");
+
   const row = document.createElement("div");
   row.className = "control-row";
 
@@ -400,9 +446,9 @@ function budgetPicker(taskId, flexBudgets) {
   btn.onclick = () => {
     const bid = sel.value;
     if (!bid) return;
-    setMoneyAlloc(bid, taskId, 100000); // default 100k
-    refreshAll();
+    setMoneyAlloc(bid, taskId, 100000);
     state.expanded.add(taskId);
+    renderAll();
   };
 
   row.appendChild(sel);
@@ -410,9 +456,8 @@ function budgetPicker(taskId, flexBudgets) {
 
   const hint = document.createElement("div");
   hint.className = "muted";
-  hint.textContent = "Du fordeler kun handlingsrom. Statlige midler er låst og ikke spillbart.";
+  hint.textContent = "Drag på slideren for å justere (ingen rerender mens du drar).";
 
-  const wrap = document.createElement("div");
   wrap.appendChild(row);
   wrap.appendChild(hint);
   return wrap;
@@ -451,7 +496,8 @@ function budgetAllocList(taskId, flexBudgets) {
     const right = document.createElement("span");
     left.textContent = a.title;
     right.textContent = `${Number(a.amount).toLocaleString("nb-NO")} kr`;
-    label.appendChild(left); label.appendChild(right);
+    label.appendChild(left);
+    label.appendChild(right);
 
     const slider = document.createElement("input");
     slider.type = "range";
@@ -464,8 +510,11 @@ function budgetAllocList(taskId, flexBudgets) {
       const v = Number(e.target.value || 0);
       right.textContent = `${v.toLocaleString("nb-NO")} kr`;
       setMoneyAlloc(a.budget_line_id, taskId, v);
-      refreshAll();
-      state.expanded.add(taskId);
+      updateDuringDrag(taskId);
+    });
+
+    slider.addEventListener("change", () => {
+      finalizeAfterDrag();
     });
 
     const actions = document.createElement("div");
@@ -476,8 +525,8 @@ function budgetAllocList(taskId, flexBudgets) {
     remove.textContent = "Fjern";
     remove.onclick = () => {
       removeMoneyAlloc(a.budget_line_id, taskId);
-      refreshAll();
       state.expanded.add(taskId);
+      renderAll();
     };
 
     actions.appendChild(document.createElement("div"));
@@ -492,8 +541,7 @@ function budgetAllocList(taskId, flexBudgets) {
   return list;
 }
 
-/* ---------- Submit ---------- */
-
+/* ---------- Submit enable/disable ---------- */
 function updateSubmitEnabled() {
   const btn = el("submitPlay");
   const hint = el("submitHint");
@@ -509,6 +557,7 @@ function updateSubmitEnabled() {
   else hint.textContent = "Klar til innsending.";
 }
 
+/* ---------- Submit ---------- */
 async function submitPlay() {
   const name = (state.playerName || el("playerName").value || "").trim();
   if (!name) return alert("Vennligst skriv navnet ditt før innsending.");
@@ -555,10 +604,9 @@ async function submitPlay() {
   alert("Takk! Ditt innspill er lagret.");
 }
 
-/* ---------- Editor helpers ---------- */
-
+/* ---------- Editor (same as before) ---------- */
 async function importCsv() {
-  const file = el("csvFile").files?.[0];
+  const file = el("csvFile")?.files?.[0];
   if (!file) return editorMsg("Velg en CSV-fil først.");
 
   const type = el("csvType").value;
@@ -604,7 +652,7 @@ async function importCsv() {
     }
 
     await loadData();
-    refreshAll();
+    renderAll();
   } catch (e) {
     editorMsg(`Feil ved import: ${e.message || e}`);
   }
@@ -630,9 +678,10 @@ async function resetScenarioData() {
   }
 }
 
-function editorMsg(t) { el("editorMsg").textContent = t; }
-
-/* ---------- CSV utils ---------- */
+function editorMsg(t) {
+  const n = el("editorMsg");
+  if (n) n.textContent = t;
+}
 
 function parseCsv(text) {
   const lines = text.replace(/\r/g, "").split("\n").filter(l => l.trim().length);
@@ -647,7 +696,6 @@ function parseCsv(text) {
   }
   return out;
 }
-
 function splitCsvLine(line) {
   const res = [];
   let cur = "";
