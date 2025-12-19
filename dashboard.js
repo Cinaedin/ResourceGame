@@ -25,6 +25,10 @@ async function loadDashboard(){
     const tasks   = tasksRes.data || [];
     const plays   = playsRes.data || [];
 
+    const taskById = new Map(tasks.map(t => [t.id, t]));
+    const personById = new Map(people.map(p => [p.id, p]));
+    const budgetById = new Map(budgets.map(b => [b.id, b]));
+
     renderFundsPie(budgets);
     renderPeoplePie(people);
 
@@ -62,7 +66,7 @@ async function loadDashboard(){
     el("dashMsg").textContent = `Innsendinger: ${plays.length}`;
     renderCharts(tasks, timeByTask, moneyByTask);
     renderIgnoredTasks(tasks, timeByTask, moneyByTask);
-    renderSubmissions(plays, logs);
+    renderSubmissions(plays, logs, { taskById, personById, budgetById });
 
     cache = { tasks, timeByTask, moneyByTask };
   } catch(e){
@@ -128,7 +132,7 @@ function renderIgnoredTasks(tasks, timeByTask, moneyByTask){
   wrap.innerHTML = `<b>${ignored.length}</b> oppgaver uten dekning:<ul>${ignored.map(t=>`<li>${escapeHtml(t.title)}</li>`).join("")}</ul>`;
 }
 
-function renderSubmissions(plays, logs){
+function renderSubmissions(plays, logs, lookups){
   const wrap = el("submissions");
   if (!plays.length){
     wrap.innerHTML = `<div class="muted">Ingen innsendinger ennå.</div>`;
@@ -154,26 +158,100 @@ function renderSubmissions(plays, logs){
       const log = logsBy.get(id);
       const raw = log?.raw || null;
 
-      // Nice view
-      el("logNice").innerHTML = raw ? renderNice(raw) : "<div class='muted'>(ingen logg)</div>";
-      // Raw JSON
+      el("logNice").innerHTML = raw ? renderNice(raw, lookups) : "<div class='muted'>(ingen logg)</div>";
       el("logRaw").textContent = raw ? JSON.stringify(raw, null, 2) : "(ingen logg)";
     };
   });
 }
 
-function renderNice(raw){
-  // raw: { time:[{person_id,task_id,pct}], money:[{budget_line_id,task_id,amount}] }
+function renderNice(raw, { taskById, personById, budgetById }){
   const time = raw.time || [];
   const money = raw.money || [];
+
+  // Summer per oppgave
+  const timeByTask = new Map();
+  for (const a of time){
+    const k = a.task_id;
+    timeByTask.set(k, (timeByTask.get(k)||0) + Number(a.pct||0));
+  }
+  const moneyByTask = new Map();
+  for (const a of money){
+    const k = a.task_id;
+    moneyByTask.set(k, (moneyByTask.get(k)||0) + Number(a.amount||0));
+  }
+
+  const timeRows = time
+    .filter(a => Number(a.pct||0) > 0)
+    .map(a => ({
+      oppgave: taskById.get(a.task_id)?.title || a.task_id,
+      person: personById.get(a.person_id)?.name || a.person_id,
+      pct: Number(a.pct||0)
+    }))
+    .sort((a,b)=> b.pct - a.pct);
+
+  const moneyRows = money
+    .filter(a => Number(a.amount||0) > 0)
+    .map(a => ({
+      oppgave: taskById.get(a.task_id)?.title || a.task_id,
+      linje: budgetById.get(a.budget_line_id)?.title || a.budget_line_id,
+      nok: Number(a.amount||0)
+    }))
+    .sort((a,b)=> b.nok - a.nok);
+
+  const topOppgaver = [...new Set([
+    ...[...timeByTask.entries()].map(([k,v])=>({k,v})),
+    ...[...moneyByTask.entries()].map(([k,v])=>({k,v}))
+  ].map(x=>x.k))]
+  .map(k => ({
+    title: taskById.get(k)?.title || k,
+    tid: timeByTask.get(k) || 0,
+    nok: moneyByTask.get(k) || 0
+  }))
+  .sort((a,b)=> (b.tid+b.nok) - (a.tid+a.nok))
+  .slice(0, 8);
 
   return `
     <div><b>Oppsummering</b></div>
     <ul>
-      <li>Tidsallokeringer: <b>${time.length}</b></li>
-      <li>Budsjettallokeringer: <b>${money.length}</b></li>
+      <li>Tidsallokeringer: <b>${timeRows.length}</b></li>
+      <li>Budsjettallokeringer: <b>${moneyRows.length}</b></li>
     </ul>
-    <div class="muted">Detaljer finnes under “Vis rådata (JSON)”.</div>
+
+    <div style="margin-top:10px"><b>Topp oppgaver i denne innsendingen</b></div>
+    <table>
+      <thead><tr><th>Oppgave</th><th>Tid (%)</th><th>Handlingsrom (kr)</th></tr></thead>
+      <tbody>
+        ${topOppgaver.map(r=>`
+          <tr>
+            <td>${escapeHtml(r.title)}</td>
+            <td>${r.tid}</td>
+            <td>${Number(r.nok).toLocaleString("nb-NO")}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+
+    <div style="margin-top:10px"><b>Detaljer – tid</b></div>
+    <table>
+      <thead><tr><th>Oppgave</th><th>Person</th><th>%</th></tr></thead>
+      <tbody>
+        ${timeRows.slice(0, 30).map(r=>`
+          <tr><td>${escapeHtml(r.oppgave)}</td><td>${escapeHtml(r.person)}</td><td>${r.pct}</td></tr>
+        `).join("")}
+      </tbody>
+    </table>
+
+    <div style="margin-top:10px"><b>Detaljer – budsjett</b></div>
+    <table>
+      <thead><tr><th>Oppgave</th><th>Linje</th><th>kr</th></tr></thead>
+      <tbody>
+        ${moneyRows.slice(0, 30).map(r=>`
+          <tr><td>${escapeHtml(r.oppgave)}</td><td>${escapeHtml(r.linje)}</td><td>${Number(r.nok).toLocaleString("nb-NO")}</td></tr>
+        `).join("")}
+      </tbody>
+    </table>
+
+    <div class="muted" style="margin-top:8px">Rådata ligger under “Vis rådata (JSON)”.</div>
   `;
 }
 
