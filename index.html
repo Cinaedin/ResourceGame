@@ -5,210 +5,67 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Prioriteringsøvelse – Næringsavdelingen</title>
 
-  <!-- Libraries -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-
-  <!-- Config -->
   <script src="config.js"></script>
 
   <style>
-    :root {
-      --bg:#f5f6f7;
-      --card:#ffffff;
-      --text:#111827;
-      --muted:#6b7280;
-      --green:#16a34a;
-      --yellow:#f59e0b;
-      --red:#dc2626;
-      --blue:#2563eb;
+    :root{
+      --bg:#f5f6f7; --card:#fff; --text:#111827; --muted:#6b7280;
+      --green:#16a34a; --yellow:#f59e0b; --red:#dc2626; --blue:#2563eb;
       --border:#e5e7eb;
     }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
+    header{background:#0f172a;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center}
+    header h1{margin:0;font-size:18px;font-weight:600}
+    main{padding:16px}
+    .card{background:var(--card);border-radius:10px;padding:14px;box-shadow:0 6px 16px rgba(0,0,0,.08);margin-bottom:16px}
+    .row{display:flex;gap:16px;align-items:flex-start}
+    .col{flex:1;min-width:0}
+    h2{margin:0 0 6px;font-size:16px}
+    h3{margin:12px 0 6px;font-size:14px}
+    .muted{color:var(--muted);font-size:12px}
+    .btn{border:0;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:13px}
+    .btn.primary{background:var(--blue);color:#fff}
+    .btn.ghost{background:#eef2ff;color:#1e3a8a}
+    .btn.danger{background:#fee2e2;color:var(--red)}
+    .hidden{display:none!important}
 
-    * { box-sizing: border-box; }
-    body {
-      margin:0;
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      background:var(--bg);
-      color:var(--text);
-    }
+    .bar{height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden;margin-top:6px}
+    .bar>span{display:block;height:100%;background:var(--green);width:0%;transition:width .15s}
+    .bar.over>span{background:var(--red)}
 
-    header {
-      background:#0f172a;
-      color:#fff;
-      padding:14px 18px;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-    }
+    /* Tasks */
+    .task{border:2px solid var(--border);border-radius:10px;padding:12px;margin-top:10px;background:#fff}
+    .task.red{border-color:var(--red)}
+    .task.yellow{border-color:var(--yellow)}
+    .task.green{border-color:var(--green)}
+    .task-header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+    .task-title{font-weight:650;font-size:14px}
+    .task-status{font-size:12px;margin-top:2px}
+    .task-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+    .pill{display:inline-block;padding:2px 10px;border-radius:999px;background:#e5e7eb;font-size:11px}
 
-    header h1 {
-      margin:0;
-      font-size:18px;
-      font-weight:600;
-    }
+    details{margin-top:10px}
+    summary{cursor:pointer;font-weight:600;font-size:13px}
+    .sliders{margin-top:8px;display:grid;gap:10px}
+    .slider-row label{display:flex;justify-content:space-between;font-size:13px}
+    input[type=range]{width:100%}
 
-    header .modes button {
-      margin-left:6px;
-    }
-
-    main {
-      padding:16px;
-    }
-
-    .card {
-      background:var(--card);
-      border-radius:10px;
-      padding:14px;
-      box-shadow:0 6px 16px rgba(0,0,0,.08);
-      margin-bottom:16px;
-    }
-
-    .row {
-      display:flex;
-      gap:16px;
-      align-items:flex-start;
-    }
-
-    .col {
-      flex:1;
-      min-width:0;
-    }
-
-    h2 {
-      margin:0 0 6px;
-      font-size:16px;
-    }
-
-    h3 {
-      margin:14px 0 6px;
-      font-size:14px;
-    }
-
-    .muted {
-      color:var(--muted);
-      font-size:12px;
-    }
-
-    .btn {
-      border:0;
-      border-radius:8px;
-      padding:8px 12px;
-      cursor:pointer;
-      font-size:13px;
-    }
-
-    .btn.primary { background:var(--blue); color:#fff; }
-    .btn.ghost { background:#eef2ff; color:#1e3a8a; }
-    .btn.warn { background:#fff7ed; color:#9a3412; }
-    .btn.danger { background:#fee2e2; color:var(--red); }
-
-    .hidden { display:none !important; }
-
-    /* Scenario context bars */
-    .bar {
-      height:10px;
-      background:#e5e7eb;
-      border-radius:999px;
-      overflow:hidden;
-      margin-top:6px;
-    }
-
-    .bar > span {
-      display:block;
-      height:100%;
-      background:var(--green);
-      width:0%;
-      transition:width .2s;
-    }
-
-    .bar.over > span {
-      background:var(--red);
-    }
-
-    /* Task list */
-    .task-group {
-      margin-bottom:10px;
-    }
-
-    .task-group-header {
-      font-weight:600;
-      cursor:pointer;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-    }
-
-    .task {
-      border:2px solid var(--border);
-      border-radius:8px;
-      padding:10px;
-      margin-top:6px;
-      cursor:pointer;
-      background:#fff;
-    }
-
-    .task.red { border-color:var(--red); }
-    .task.yellow { border-color:var(--yellow); }
-    .task.green { border-color:var(--green); }
-
-    .task-title {
-      font-weight:600;
-      font-size:14px;
-    }
-
-    .task-status {
-      font-size:12px;
-      margin-top:4px;
-    }
-
-    /* Task panel */
-    #taskPanel {
-      position:fixed;
-      top:56px;
-      right:0;
-      width:380px;
-      height:calc(100% - 56px);
-      background:#fff;
-      box-shadow:-4px 0 12px rgba(0,0,0,.15);
-      padding:16px;
-      overflow:auto;
-      z-index:50;
-    }
-
-    #taskPanel h2 {
-      margin-top:0;
-    }
-
-    .slider-row {
-      margin-bottom:10px;
-    }
-
-    .slider-row label {
-      display:flex;
-      justify-content:space-between;
-      font-size:13px;
-    }
-
-    input[type=range] {
-      width:100%;
-    }
-
-    /* Footer safety note */
-    footer {
-      text-align:center;
-      font-size:12px;
-      color:var(--muted);
-      padding:10px 0;
-    }
+    footer{text-align:center;font-size:12px;color:var(--muted);padding:10px 0}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid var(--border);text-align:left}
+    th{font-size:12px;color:var(--muted);font-weight:650}
+    textarea{width:100%;min-height:100px}
+    select,input[type=file],input[type=text]{padding:6px;border:1px solid var(--border);border-radius:8px}
   </style>
 </head>
 
 <body>
-
 <header>
   <h1>Prioriteringsøvelse – Næringsavdelingen</h1>
-  <div class="modes">
+  <div>
     <button class="btn ghost" id="modeEditor">Editor</button>
     <button class="btn ghost" id="modePlayer">Spiller</button>
     <button class="btn ghost" id="modeDashboard">Dashboard</button>
@@ -219,8 +76,7 @@
 
   <!-- SCENARIO CONTEXT -->
   <div class="card">
-    <strong>Scenario:</strong>
-    <span id="scenarioTitle" class="muted">–</span>
+    <strong>Scenario:</strong> <span id="scenarioTitle" class="muted">–</span>
     <div class="muted" id="scenarioLock">–</div>
 
     <h3>Personellkapasitet</h3>
@@ -232,53 +88,76 @@
     <div class="muted" id="budgetCapacityText"></div>
   </div>
 
-  <!-- PLAYER VIEW -->
-  <section id="playerView">
-
+  <!-- EDITOR VIEW -->
+  <section id="editorView" class="hidden">
     <div class="card">
-      <label>
-        Navn:
-        <input id="playerName" placeholder="Skriv navnet ditt" />
-      </label>
+      <h2>Editor</h2>
       <div class="muted">
-        Dette er en prioriteringsøvelse. Innsendinger brukes aggregert.
-        Ikke en evaluering av enkeltpersoner.
+        Her kan dere bygge scenario sammen (enkel versjon). Endringer lagres i databasen og blir synlige for alle.
       </div>
-    </div>
-
-    <div class="card">
-      <strong>Dekning:</strong>
-      <span id="coverageMeter">0 / 0 oppgaver dekket</span>
-      <button class="btn ghost" id="filterUncovered" style="margin-left:10px;">
-        Vis kun oppgaver uten dekning
-      </button>
     </div>
 
     <div class="row">
-      <div class="col">
-        <div id="taskList"></div>
+      <div class="col card">
+        <h2>CSV-import</h2>
+        <div class="muted">Støtter: Personer, Oppgaver, Budsjettlinjer.</div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
+          <select id="csvType">
+            <option value="people">Personer</option>
+            <option value="tasks">Oppgaver</option>
+            <option value="budget_lines">Budsjettlinjer</option>
+          </select>
+          <input type="file" id="csvFile" accept=".csv" />
+          <button class="btn primary" id="btnImportCsv">Importer CSV</button>
+        </div>
+        <div class="muted" style="margin-top:10px">
+          CSV-format:
+          <ul>
+            <li><b>Personer</b>: name, capacity_pct</li>
+            <li><b>Oppgaver</b>: title, program</li>
+            <li><b>Budsjettlinjer</b>: title, type (handlingsrom/stat), amount_nok</li>
+          </ul>
+        </div>
+        <div id="editorMsg" class="muted" style="margin-top:8px"></div>
+      </div>
+
+      <div class="col card">
+        <h2>Scenario-kontroll</h2>
+        <button class="btn danger" id="btnResetScenario">Reset scenario (sletter innsendinger)</button>
+        <div class="muted" style="margin-top:8px">
+          Reset sletter playthroughs, allocations og logs for dette scenarioet. Selve oppgaver/personer/budsjett beholdes.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLAYER VIEW -->
+  <section id="playerView">
+    <div class="card">
+      <label>Navn:
+        <input id="playerName" placeholder="Skriv navnet ditt" />
+      </label>
+      <div class="muted">
+        Dette er en prioriteringsøvelse. Innsendinger brukes aggregert. Ikke en evaluering av enkeltpersoner.
       </div>
     </div>
 
     <div class="card">
-      <button class="btn primary" id="submitPlay">Send inn prioritering</button>
+      <strong>Dekning:</strong> <span id="coverageMeter">0 / 0 oppgaver dekket</span>
+      <button class="btn ghost" id="filterUncovered" style="margin-left:10px">Vis kun oppgaver uten dekning</button>
     </div>
 
+    <div id="taskList"></div>
+
+    <div class="card">
+      <button class="btn primary" id="submitPlay">Send inn prioritering</button>
+      <div class="muted" id="submitHint" style="margin-top:6px"></div>
+    </div>
   </section>
 
 </main>
 
-<!-- TASK PANEL -->
-<div id="taskPanel" class="hidden">
-  <h2 id="taskPanelTitle"></h2>
-  <div id="taskPanelContent"></div>
-  <button class="btn ghost" id="resetTask">Nullstill denne oppgaven</button>
-  <button class="btn ghost" id="closeTaskPanel">Lukk</button>
-</div>
-
-<footer>
-  Dette verktøyet er en øvelse for å synliggjøre prioriteringer og begrensninger.
-</footer>
+<footer>Dette verktøyet er en øvelse for å synliggjøre prioriteringer og begrensninger.</footer>
 
 <script src="app.js"></script>
 </body>
