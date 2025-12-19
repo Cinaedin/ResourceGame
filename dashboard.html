@@ -10,11 +10,12 @@
   <script src="config.js"></script>
 
   <style>
-    :root{--bg:#f5f6f7;--card:#fff;--text:#111827;--muted:#6b7280;--border:#e5e7eb;}
+    :root{--bg:#f5f6f7;--card:#fff;--text:#111827;--muted:#6b7280;--border:#e5e7eb;--blue:#2563eb;}
     *{box-sizing:border-box}
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
-    header{background:#0f172a;color:#fff;padding:14px 18px}
+    header{background:#0f172a;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px}
     header h1{margin:0;font-size:18px;font-weight:600}
+    .btn{border:0;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:13px;background:#eef2ff;color:#1e3a8a}
     main{padding:16px}
     .card{background:var(--card);border-radius:10px;padding:14px;box-shadow:0 6px 16px rgba(0,0,0,.08);margin-bottom:16px}
     .row{display:flex;gap:16px;align-items:flex-start}
@@ -25,17 +26,23 @@
     th,td{padding:8px;border-bottom:1px solid var(--border);text-align:left}
     th{font-size:12px;color:var(--muted);font-weight:650}
     pre{white-space:pre-wrap;font-size:12px;background:#f8fafc;padding:10px;border-radius:8px;border:1px solid var(--border);margin:0}
-    button{border:0;border-radius:10px;padding:8px 12px;cursor:pointer;background:#2563eb;color:#fff;font-size:13px}
+    button.action{border:0;border-radius:10px;padding:8px 12px;cursor:pointer;background:var(--blue);color:#fff;font-size:13px}
   </style>
 </head>
-<body>
-<header><h1>Dashboard – Prioriteringsøvelse</h1></header>
-<main>
 
+<body>
+<header>
+  <h1>Dashboard – Prioriteringsøvelse</h1>
+  <div>
+    <button class="btn" onclick="window.location.href='index.html#editor'">Editor</button>
+    <button class="btn" onclick="window.location.href='index.html'">Spiller</button>
+    <button class="btn" onclick="window.location.href='dashboard.html'">Dashboard</button>
+  </div>
+</header>
+
+<main>
   <div class="card">
-    <div class="muted">
-      Viser aggregert oversikt over innsendte prioriteringer (ikke en evaluering av enkeltpersoner).
-    </div>
+    <div class="muted">Viser aggregert oversikt over innsendte prioriteringer (ikke en evaluering av enkeltpersoner).</div>
     <div class="muted" id="dashMsg" style="margin-top:8px"></div>
   </div>
 
@@ -72,21 +79,24 @@
     <div class="col card">
       <h2>Innsendinger</h2>
       <div id="submissions">(laster...)</div>
-      <button id="exportCsv" style="margin-top:10px">Eksporter aggregert CSV</button>
+      <button class="action" id="exportCsv" style="margin-top:10px">Eksporter aggregert CSV</button>
     </div>
   </div>
 
   <div class="card">
-    <h2>Detaljvisning (lesbart)</h2>
+    <h2>Detaljvisning</h2>
     <div id="logNice">(velg en innsending)</div>
     <details style="margin-top:10px">
       <summary>Vis rådata (JSON)</summary>
       <pre id="logRaw">(velg en innsending)</pre>
     </details>
   </div>
-
 </main>
 
 <script src="dashboard.js"></script>
+<script>
+  // Optional: deep-link til editor fra dashboard
+  if (location.hash === "#editor") window.location.href = "index.html#editor";
+</script>
 </body>
 </html>
